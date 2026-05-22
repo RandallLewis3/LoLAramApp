@@ -1,0 +1,11 @@
+node_modules
+dist
+.DS_Store
+.env
+.vscode
+public/server-port.json
+server/data
+*.log
+temp_*.txt
+src/**/*.js
+src/**/*.js.map

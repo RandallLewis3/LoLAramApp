@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: lol-aram-app
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm run server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
