@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOST || 'localhost';
+const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve('./server/data');
 const PORT_FILE_DIRS = ['public', 'dist'];
 const FALLBACK_CHAMPIONS = [
