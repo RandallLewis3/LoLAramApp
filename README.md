@@ -14,6 +14,3 @@ A Vue 3 + TypeScript live session app for ARAM players. Join a local WebSocket s
 Alternatively, run both together:
 
 - `npm run dev:full`
-
-Live deployment
-https://lolaramapp.onrender.com
