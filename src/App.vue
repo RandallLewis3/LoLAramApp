@@ -27,9 +27,8 @@ export default {
 }
 
 .app-shell {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+  width: 100%;
+  padding: 1rem 0;
 }
 
 .hero {

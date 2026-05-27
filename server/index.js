@@ -164,16 +164,28 @@ function findSession(sessionId) {
   return session;
 }
 
+function pickUnlockChampionId(session) {
+  const promised = new Set(
+    session.goals
+      .filter((g) => !g.completed && g.unlockChampionId)
+      .map((g) => g.unlockChampionId)
+  );
+  const available = session.lockedChampionIds.filter((id) => !promised.has(id));
+  return available.length ? chooseRandom(available) : null;
+}
+
 function createGoalForChampion(player, session, championId, goalType) {
   const goalTemplates = {
     win: (champ) => `Win a game while playing ${champ} using ${chooseRandom(SUMMONER_SPELLS)}`,
-    killsAssists: (champ) => `Get 15 kills or assists with ${champ}`,
+    takedowns15: (champ) => `Get 15 takedowns with ${champ}`,
+    takedowns25: (champ) => `Get 25 takedowns with ${champ}`,
+    takedowns40: (champ) => `Get 40 takedowns with ${champ}`,
     cs: (champ) => `Reach 50 CS with ${champ}`,
     multikill: (champ) => `Score a triple kill with ${champ}`
   };
 
   const description = goalTemplates[goalType] ? goalTemplates[goalType](championId) : '';
-  const unlockChampionId = session.lockedChampionIds.length ? chooseRandom(session.lockedChampionIds) : null;
+  const unlockChampionId = pickUnlockChampionId(session);
   const unlockForPlayerId = session.players.length ? chooseRandom(session.players).id : player.id;
 
   return {
@@ -195,42 +207,60 @@ function refreshGoals(session) {
     existingGoals.set(key, goal);
   });
 
-  const newGoals = [];
   session.players.forEach((player) => {
-    const goalTypes = ['win', 'killsAssists', 'cs', 'multikill'];
+    const goalTypes = ['win', 'takedowns15', 'takedowns25', 'takedowns40', 'multikill'];
     player.unlockedChampionIds.forEach((championId) => {
       goalTypes.forEach((goalType) => {
         const key = `${player.id}-${championId}-${goalType}`;
         if (!existingGoals.has(key)) {
-          newGoals.push(createGoalForChampion(player, session, championId, goalType));
+          const goal = createGoalForChampion(player, session, championId, goalType);
+          session.goals.push(goal);
+          existingGoals.set(key, goal);
         }
       });
     });
   });
-
-  session.goals.push(...newGoals);
 }
 
 function createGoalForPlayer(player, session) {
   const goalTypes = [
     { type: 'win', template: (champ) => `Win a game while playing ${champ} using ${chooseRandom(SUMMONER_SPELLS)}` },
-    { type: 'killsAssists', template: (champ) => `Get 15 kills or assists with ${champ}` },
-    { type: 'cs', template: (champ) => `Reach 50 CS with ${champ}` },
+    { type: 'takedowns15', template: (champ) => `Get 15 takedowns with ${champ}` },
+    { type: 'takedowns25', template: (champ) => `Get 25 takedowns with ${champ}` },
+    { type: 'takedowns40', template: (champ) => `Get 40 takedowns with ${champ}` },
     { type: 'multikill', template: (champ) => `Score a triple kill with ${champ}` }
   ];
 
-  const template = chooseRandom(goalTypes);
   const candidateChampions = player.unlockedChampionIds.length ? player.unlockedChampionIds : session.unlockedChampionIds;
-  const championId = chooseRandom(candidateChampions);
-  const unlockChampionId = session.lockedChampionIds.length ? chooseRandom(session.lockedChampionIds) : null;
+
+  const activeKeys = new Set(
+    session.goals
+      .filter((g) => g.playerId === player.id)
+      .map((g) => `${g.championId}-${g.type}`)
+  );
+
+  const available = [];
+  candidateChampions.forEach((championId) => {
+    goalTypes.forEach((gt) => {
+      if (!activeKeys.has(`${championId}-${gt.type}`)) {
+        available.push({ championId, goalType: gt });
+      }
+    });
+  });
+
+  const pick = available.length
+    ? chooseRandom(available)
+    : { championId: chooseRandom(candidateChampions), goalType: chooseRandom(goalTypes) };
+
+  const unlockChampionId = pickUnlockChampionId(session);
   const unlockForPlayerId = session.players.length ? chooseRandom(session.players).id : player.id;
 
   return {
     id: randomId(),
     playerId: player.id,
-    type: template.type,
-    description: template.template(championId),
-    championId,
+    type: pick.goalType.type,
+    description: pick.goalType.template(pick.championId),
+    championId: pick.championId,
     completed: false,
     unlockChampionId,
     unlockForPlayerId
@@ -341,7 +371,22 @@ function completeGoal(session, playerId, goalId) {
   }
 
   goal.completed = true;
+  goal.completedAt = Date.now();
+  const { unlockChampionId, unlockForPlayerId } = goal;
   applyUnlock(session, goal);
+
+  if (unlockChampionId && unlockForPlayerId) {
+    const target = session.players.find((p) => p.id === unlockForPlayerId);
+    if (target) {
+      const existingKeys = new Set(session.goals.map((g) => `${g.playerId}-${g.championId}-${g.type}`));
+      ['win', 'takedowns15', 'takedowns25', 'takedowns40', 'multikill'].forEach((goalType) => {
+        const key = `${target.id}-${unlockChampionId}-${goalType}`;
+        if (!existingKeys.has(key)) {
+          session.goals.push(createGoalForChampion(target, session, unlockChampionId, goalType));
+        }
+      });
+    }
+  }
 
   const player = session.players.find((item) => item.id === playerId);
   if (player) {
@@ -422,8 +467,14 @@ async function verifyMatchGoal(session, playerId, goalId, matchId, apiKey) {
 
     let valid = false;
     switch (goal.type) {
-      case 'killsAssists':
+      case 'takedowns15':
         valid = participant.kills + participant.assists >= 15;
+        break;
+      case 'takedowns25':
+        valid = participant.kills + participant.assists >= 25;
+        break;
+      case 'takedowns40':
+        valid = participant.kills + participant.assists >= 40;
         break;
       case 'cs':
         valid = participant.totalMinionsKilled + participant.neutralMinionsKilled >= 120;
@@ -580,7 +631,10 @@ wss.on('connection', (ws, req) => {
   const session = findSession(sessionId);
   session.clients.add(ws);
 
-  const player = addPlayerToSession(session, playerName);
+  const existingPlayer = session.players.find(
+    (p) => p.name.toLowerCase() === playerName.trim().toLowerCase()
+  );
+  const player = existingPlayer ?? addPlayerToSession(session, playerName);
   if (!player) {
     ws.send(JSON.stringify({ type: 'error', payload: 'This session is full.' }));
     ws.close();
@@ -588,7 +642,9 @@ wss.on('connection', (ws, req) => {
   }
 
   ws.send(JSON.stringify({ type: 'joined', payload: { playerId: player.id, state: session } }));
-  broadcastSession(session);
+  if (!existingPlayer) {
+    broadcastSession(session);
+  }
 
   ws.on('message', async (raw) => {
     try {

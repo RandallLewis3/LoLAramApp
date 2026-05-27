@@ -1,4 +1,4 @@
-export type GoalType = 'killsAssists' | 'cs' | 'multikill' | 'killstreak' | 'win';
+export type GoalType = 'takedowns15' | 'takedowns25' | 'takedowns40' | 'cs' | 'multikill' | 'killstreak' | 'win';
 export type SessionPhase = 'lobby' | 'active';
 
 export interface Goal {
@@ -8,6 +8,7 @@ export interface Goal {
   description: string;
   championId: string;
   completed: boolean;
+  completedAt?: number;
   unlockChampionId: string | null;
   unlockForPlayerId: string | null;
 }

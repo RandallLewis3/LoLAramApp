@@ -118,6 +118,11 @@
                       v-for="championId in sortChampionIds(player.unlockedChampionIds)"
                       :key="championId"
                       class="champion-tag"
+                      :class="{
+                        'champion-tag-clickable': player.id === currentPlayerId,
+                        'champion-tag-selected': player.id === currentPlayerId && selectedChampionFilter.includes(championId)
+                      }"
+                      @click="player.id === currentPlayerId ? toggleChampionFilter(championId) : undefined"
                     >
                       <img
                         class="champion-icon"
@@ -138,21 +143,25 @@
           <div class="goals-header">
             <h2>My Goals</h2>
             <div class="goals-tabs">
-              <button 
-                class="tab-button" 
+              <button
+                class="tab-button"
                 :class="{ active: !showCompletedGoals }"
                 @click="showCompletedGoals = false"
               >
                 Active
               </button>
-              <button 
-                class="tab-button" 
+              <button
+                class="tab-button"
                 :class="{ active: showCompletedGoals }"
                 @click="showCompletedGoals = true"
               >
                 Completed
               </button>
             </div>
+          </div>
+          <div v-if="selectedChampionFilter.length > 0" class="filter-bar">
+            <span class="filter-bar-label">Filtered: {{ selectedChampionFilter.map(getChampionName).join(', ') }}</span>
+            <button class="filter-clear-button" type="button" @click="clearChampionFilter">Show all</button>
           </div>
 
           <div v-if="!showCompletedGoals" class="goals-content">
@@ -225,6 +234,23 @@
             <p class="error-message" v-if="verificationMessage">{{ verificationMessage }}</p>
           </div>
         </article>
+
+        <aside class="activity-log">
+          <h2>Activity</h2>
+          <ul class="activity-list">
+            <li v-for="entry in activityLog" :key="entry.goalId" class="activity-entry">
+              <div class="activity-header">
+                <span class="activity-player">{{ entry.playerName }}</span>
+                <span class="activity-time">{{ entry.time }}</span>
+              </div>
+              <p class="activity-desc">{{ entry.description }}</p>
+              <div class="activity-unlock" v-if="entry.unlockChampionName">
+                Unlocked {{ entry.unlockChampionName }} for {{ entry.unlockForPlayerName }}
+              </div>
+            </li>
+            <li v-if="!activityLog.length" class="activity-empty">No completed goals yet.</li>
+          </ul>
+        </aside>
       </div>
 
       <section class="champion-pool-panel">
@@ -528,8 +554,36 @@ export default defineComponent({
     const openGoals = computed(() => sortGoalsByChampion(session.goals.filter((goal) => !goal.completed)));
     const completedGoals = computed(() => sortGoalsByChampion(session.goals.filter((goal) => goal.completed)));
 
-    const currentPlayerOpenGoals = computed(() => sortGoalsByChampion(session.goals.filter((goal) => !goal.completed && goal.playerId === currentPlayerId.value)));
-    const currentPlayerCompletedGoals = computed(() => sortGoalsByChampion(session.goals.filter((goal) => goal.completed && goal.playerId === currentPlayerId.value)));
+    const selectedChampionFilter = ref<string[]>([]);
+
+    function toggleChampionFilter(championId: string) {
+      const idx = selectedChampionFilter.value.indexOf(championId);
+      if (idx >= 0) {
+        selectedChampionFilter.value.splice(idx, 1);
+      } else {
+        selectedChampionFilter.value.push(championId);
+      }
+    }
+
+    function clearChampionFilter() {
+      selectedChampionFilter.value = [];
+    }
+
+    const currentPlayerOpenGoals = computed(() => {
+      let goals = session.goals.filter((goal) => !goal.completed && goal.playerId === currentPlayerId.value);
+      if (selectedChampionFilter.value.length > 0) {
+        goals = goals.filter((goal) => selectedChampionFilter.value.includes(goal.championId));
+      }
+      return sortGoalsByChampion(goals);
+    });
+
+    const currentPlayerCompletedGoals = computed(() => {
+      let goals = session.goals.filter((goal) => goal.completed && goal.playerId === currentPlayerId.value);
+      if (selectedChampionFilter.value.length > 0) {
+        goals = goals.filter((goal) => selectedChampionFilter.value.includes(goal.championId));
+      }
+      return sortGoalsByChampion(goals);
+    });
 
     const unlockedChampionEntries = computed(() => {
       const query = championFilter.value.trim().toLowerCase();
@@ -559,6 +613,24 @@ export default defineComponent({
 
     const isHost = computed(() => session.hostId === currentPlayerId.value);
 
+    function formatTime(timestamp: number): string {
+      return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    const activityLog = computed(() =>
+      session.goals
+        .filter((goal) => goal.completed)
+        .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
+        .map((goal) => ({
+          goalId: goal.id,
+          playerName: getPlayerName(goal.playerId),
+          description: goal.description,
+          time: goal.completedAt ? formatTime(goal.completedAt) : '',
+          unlockChampionName: goal.unlockChampionId ? getChampionName(goal.unlockChampionId) : null,
+          unlockForPlayerName: goal.unlockForPlayerId ? getPlayerName(goal.unlockForPlayerId) : null,
+        }))
+    );
+
     return {
       name,
       sessionId,
@@ -586,6 +658,7 @@ export default defineComponent({
       getPlayerName,
       getChampionName,
       getChampionImageUrlSafe,
+      onChampionImageError,
       sortChampionIds,
       generateSessionId,
       isCurrentPlayer,
@@ -596,7 +669,11 @@ export default defineComponent({
       currentPlayerOpenGoals,
       currentPlayerCompletedGoals,
       showCompletedGoals,
-      serverPort
+      serverPort,
+      activityLog,
+      selectedChampionFilter,
+      toggleChampionFilter,
+      clearChampionFilter
     };
   }
 });
@@ -604,10 +681,10 @@ export default defineComponent({
 
 <style scoped>
 .session-shell {
-  width: min(100%, 1900px);
+  width: 100%;
   max-width: 1900px;
   margin: 0 auto;
-  padding: 2rem 3rem;
+  padding: 1rem 0;
   font-family: Inter, system-ui, sans-serif;
 }
 
@@ -626,7 +703,7 @@ export default defineComponent({
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 1rem;
-  padding: 1.5rem;
+  padding: 1.25rem 1.5rem;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
 
@@ -698,11 +775,106 @@ input[type='text'] {
 
 .grid-layout {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(520px, 1.5fr);
+  grid-template-columns: 1.6fr 2.2fr 1.2fr;
   grid-template-rows: minmax(600px, 1fr);
   gap: 1.75rem;
   align-items: stretch;
   max-height: calc(100vh - 400px);
+}
+
+.activity-log {
+  background: #f8fafc;
+  border-radius: 1rem;
+  padding: 1rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.activity-log h2 {
+  margin: 0 0 1.25rem 0;
+}
+
+.activity-list {
+  list-style: none;
+  padding: 0;
+  padding-right: 0.75rem;
+  margin: 0 -0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+}
+
+.activity-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.activity-list::-webkit-scrollbar-track {
+  background: #e5e7eb;
+  border-radius: 10px;
+}
+
+.activity-list::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 10px;
+}
+
+.activity-list::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+.activity-entry {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.85rem;
+  padding: 0.85rem;
+  flex-shrink: 0;
+}
+
+.activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.activity-player {
+  font-weight: 700;
+  color: #111827;
+  font-size: 0.9rem;
+}
+
+.activity-time {
+  color: #9ca3af;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.activity-desc {
+  margin: 0;
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+.activity-unlock {
+  margin-top: 0.5rem;
+  color: #0f766e;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.activity-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.85rem;
+  padding: 1rem;
+  color: #6b7280;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .lobby-layout {
@@ -751,6 +923,7 @@ input[type='text'] {
 .goals-content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 0.75rem;
   margin-right: -0.75rem;
 }
@@ -798,6 +971,7 @@ input[type='text'] {
   display: grid;
   gap: 1rem;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 0.5rem;
 }
 
@@ -854,6 +1028,11 @@ input[type='text'] {
   grid-template-columns: 1fr auto;
   gap: 1rem;
   align-items: center;
+  min-width: 0;
+}
+
+.goal-line > div:first-child {
+  min-width: 0;
 }
 
 .goal-section {
@@ -906,6 +1085,39 @@ input[type='text'] {
   align-items: center;
   margin-bottom: 1.25rem;
   gap: 1.5rem;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-bar-label {
+  font-size: 0.875rem;
+  color: #1d4ed8;
+  font-weight: 500;
+}
+
+.filter-clear-button {
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 0;
+}
+
+.filter-clear-button:hover {
+  text-decoration: underline;
 }
 
 .goals-header h2 {
@@ -992,7 +1204,7 @@ input[type='text'] {
     padding: 0;
     margin: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 0.75rem;
   }
 
@@ -1026,10 +1238,37 @@ input[type='text'] {
   }
 
   .champion-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.4rem;
     margin-top: 0.5rem;
+  }
+
+  .champion-tags .champion-tag {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.85rem;
+    gap: 0.35rem;
+  }
+
+  .champion-tag-clickable {
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .champion-tag-clickable:hover {
+    border-color: #2563eb;
+  }
+
+  .champion-tag-selected {
+    background: #eff6ff;
+    border-color: #2563eb;
+    color: #1d4ed8;
+  }
+
+  .champion-tags .champion-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
   }
 
   .champion-tag {
